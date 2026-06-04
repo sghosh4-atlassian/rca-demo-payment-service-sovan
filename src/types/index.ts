@@ -267,3 +267,43 @@ export interface ServiceResult<T> {
   error?: string;
   errorCode?: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fraud Risk Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export enum FraudRiskLevel {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+}
+
+export interface FraudSignal {
+  code: string;
+  description: string;
+  weight: number;
+}
+
+export interface FraudAssessmentSummary {
+  score: number;
+  riskLevel: FraudRiskLevel;
+  blocked: boolean;
+  requiresReview: boolean;
+  signals: FraudSignal[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Retry Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RetryAttemptSummary {
+  attemptNumber: number;
+  status: 'pending' | 'succeeded' | 'failed';
+  scheduledAt: Date;
+  failureCode?: string;
+}
+
+export interface PaymentWithRiskContext extends Payment {
+  fraudAssessment?: FraudAssessmentSummary;
+  retryHistory?: RetryAttemptSummary[];
+}
