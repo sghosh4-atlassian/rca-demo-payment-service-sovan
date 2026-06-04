@@ -9,6 +9,7 @@ import {
   PaymentStatus,
   TransactionType,
   ServiceResult,
+  PaymentWithRiskContext,
 } from '../types';
 import { NotFoundError, PaymentError, IdempotencyError, ConflictError } from '../utils/errors';
 import { StripeProvider } from '../providers/StripeProvider';
@@ -16,6 +17,8 @@ import { PayPalProvider } from '../providers/PayPalProvider';
 import { TransactionService } from './TransactionService';
 import { WebhookService } from './WebhookService';
 import { CacheService } from './CacheService';
+import { FraudRiskService } from './FraudRiskService';
+import { PaymentRetryService } from './PaymentRetryService';
 import logger, { logPaymentEvent } from '../utils/logger';
 
 export class PaymentService {
@@ -24,6 +27,8 @@ export class PaymentService {
   private transactionService: TransactionService;
   private webhookService: WebhookService;
   private cacheService: CacheService;
+  private fraudRiskService: FraudRiskService;
+  private retryService: PaymentRetryService;
 
   constructor() {
     this.stripeProvider = new StripeProvider();
@@ -31,12 +36,14 @@ export class PaymentService {
     this.transactionService = new TransactionService();
     this.webhookService = new WebhookService();
     this.cacheService = new CacheService();
+    this.fraudRiskService = new FraudRiskService();
+    this.retryService = new PaymentRetryService();
   }
 
   // ── Create ────────────────────────────────────────────────────────────────
 
   async createPayment(dto: CreatePaymentDTO): Promise<Payment> {
-    // 1. Idempotency check
+    // 1. Idempotency check — return cached result immediately
     const existing = await this.getByIdempotencyKey(dto.idempotencyKey);
     if (existing) {
       logger.info('Returning cached idempotent payment', { key: dto.idempotencyKey });
@@ -46,29 +53,61 @@ export class PaymentService {
     const db = getDb();
     const paymentId = uuidv4();
 
-    // 2. Persist initial record
-    const [payment] = await db('payments')
-      .insert({
-        id: paymentId,
-        merchant_id: dto.merchantId,
-        customer_id: dto.customerId,
-        order_id: dto.orderId,
-        amount: dto.amount,
-        currency: dto.currency,
-        status: PaymentStatus.PENDING,
-        method: dto.method,
-        provider: dto.provider ?? 'stripe',
-        description: dto.description ?? null,
-        metadata: dto.metadata ? JSON.stringify(dto.metadata) : null,
-        idempotency_key: dto.idempotencyKey,
-        refunded_amount: 0,
-      })
-      .returning('*');
+    // 2. Persist initial PENDING record
+    await db('payments').insert({
+      id: paymentId,
+      merchant_id: dto.merchantId,
+      customer_id: dto.customerId,
+      order_id: dto.orderId,
+      amount: dto.amount,
+      currency: dto.currency,
+      status: PaymentStatus.PENDING,
+      method: dto.method,
+      provider: dto.provider ?? 'stripe',
+      description: dto.description ?? null,
+      metadata: dto.metadata ? JSON.stringify(dto.metadata) : null,
+      idempotency_key: dto.idempotencyKey,
+      refunded_amount: 0,
+    });
 
     logPaymentEvent('payment.created', { paymentId, amount: dto.amount, currency: dto.currency });
 
+    // 3. ── Fraud Risk Assessment ──────────────────────────────────────────
+    //    Run before touching any payment provider. A HIGH-risk score blocks
+    //    the payment immediately without incurring provider charges.
+    const fraudAssessment = await this.fraudRiskService.assess(dto, paymentId);
+
+    if (fraudAssessment.blocked) {
+      await db('payments').where({ id: paymentId }).update({
+        status: PaymentStatus.FAILED,
+        failure_code: 'FRAUD_BLOCKED',
+        failure_message: `Payment blocked by fraud risk engine (score: ${fraudAssessment.score}/100)`,
+        updated_at: new Date(),
+      });
+
+      await this.webhookService.dispatch(dto.merchantId, 'payment.failed', {
+        paymentId,
+        reason: 'FRAUD_BLOCKED',
+        score: fraudAssessment.score,
+      });
+
+      throw new PaymentError(
+        `Payment blocked: fraud risk score ${fraudAssessment.score}/100 exceeds threshold`,
+        'FRAUD_BLOCKED',
+        { score: fraudAssessment.score, signals: fraudAssessment.signals },
+      );
+    }
+
+    // Log review flag but continue processing
+    if (fraudAssessment.requiresReview) {
+      logger.warn('Payment flagged for fraud review — processing with caution', {
+        paymentId,
+        score: fraudAssessment.score,
+      });
+    }
+
     try {
-      // 3. Process with provider
+      // 4. ── Provider Processing ────────────────────────────────────────────
       const provider = this.resolveProvider(dto.provider ?? 'stripe');
       const providerResult = await provider.createPayment({
         amount: dto.amount,
@@ -80,7 +119,7 @@ export class PaymentService {
         capture: dto.capture ?? true,
       });
 
-      // 4. Update with provider result
+      // 5. Update with provider result
       const status = providerResult.captured
         ? PaymentStatus.COMPLETED
         : PaymentStatus.PROCESSING;
@@ -96,7 +135,7 @@ export class PaymentService {
         })
         .returning('*');
 
-      // 5. Record transaction
+      // 6. Record ledger transaction
       await this.transactionService.createTransaction({
         paymentId,
         type: TransactionType.PAYMENT,
@@ -108,33 +147,65 @@ export class PaymentService {
         net: providerResult.net,
       });
 
-      // 6. Cache idempotency result
+      // 7. Cache idempotency result
       await this.storeIdempotencyResult(dto.idempotencyKey, paymentId);
 
-      // 7. Fire webhook
+      // 8. Invalidate any stale cached payment entry
+      await this.cacheService.del(`payment:${paymentId}`);
+
+      // 9. Fire webhook
       await this.webhookService.dispatch(dto.merchantId, 'payment.completed', {
         paymentId,
         status,
         amount: dto.amount,
         currency: dto.currency,
+        fraudScore: fraudAssessment.score,
+        requiresReview: fraudAssessment.requiresReview,
       });
 
-      logPaymentEvent('payment.completed', { paymentId, status });
+      logPaymentEvent('payment.completed', { paymentId, status, fraudScore: fraudAssessment.score });
       return this.toPayment(updated);
-    } catch (err: any) {
-      // Mark as failed
-      await db('payments')
-        .where({ id: paymentId })
-        .update({
-          status: PaymentStatus.FAILED,
-          failure_code: err.errorCode ?? 'UNKNOWN',
-          failure_message: err.message,
-          updated_at: new Date(),
-        });
 
-      logPaymentEvent('payment.failed', { paymentId, error: err.message });
-      await this.webhookService.dispatch(dto.merchantId, 'payment.failed', { paymentId });
-      throw new PaymentError(err.message, err.errorCode);
+    } catch (err: any) {
+      const failureCode: string = err.errorCode ?? 'UNKNOWN';
+      const failureMessage: string = err.message;
+
+      // Mark payment as failed
+      await db('payments').where({ id: paymentId }).update({
+        status: PaymentStatus.FAILED,
+        failure_code: failureCode,
+        failure_message: failureMessage,
+        updated_at: new Date(),
+      });
+
+      logPaymentEvent('payment.failed', { paymentId, failureCode, error: failureMessage });
+
+      // ── Retry Scheduling ────────────────────────────────────────────────
+      //    Attempt to schedule a retry if the failure code allows it.
+      //    Non-retryable failures (fraud, permanent declines) are skipped silently.
+      try {
+        const retrySchedule = await this.retryService.scheduleRetry(
+          paymentId,
+          failureCode,
+          failureMessage,
+        );
+        logger.info('Payment retry scheduled', {
+          paymentId,
+          attemptNumber: retrySchedule.attemptNumber,
+          scheduledAt: retrySchedule.scheduledAt.toISOString(),
+        });
+      } catch (retryErr: any) {
+        // Non-retryable or exhausted — log and continue to failure path
+        logger.info('Payment will not be retried', {
+          paymentId,
+          reason: retryErr.message,
+        });
+        // Record failure velocity for fraud scoring on future attempts
+        await this.fraudRiskService.recordFailure(dto.customerId);
+      }
+
+      await this.webhookService.dispatch(dto.merchantId, 'payment.failed', { paymentId, failureCode });
+      throw new PaymentError(failureMessage, failureCode);
     }
   }
 
