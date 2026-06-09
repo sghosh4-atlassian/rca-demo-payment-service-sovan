@@ -31,11 +31,14 @@ export class RefundService {
     const db = getDb();
 
     // 1. Fetch and validate payment
-    const payment = await db('payments').where({ id: dto.paymentId }).first();
-    if (!payment) throw new NotFoundError('Payment', dto.paymentId);
+    const payment = (await db('payments').where({ id: dto.paymentId }).first()) as Record<string, unknown> | undefined;
+    if (!payment) {
+      throw new NotFoundError('Payment', dto.paymentId);
+    }
 
-    if (payment.status !== PaymentStatus.COMPLETED) {
-      throw new ConflictError(`Cannot refund payment with status: ${payment.status}`);
+    const paymentStatus = payment.status as PaymentStatus;
+    if (paymentStatus !== PaymentStatus.COMPLETED) {
+      throw new ConflictError(`Cannot refund payment with status: ${paymentStatus}`);
     }
 
     const refundAmount = dto.amount ?? Number(payment.amount);
@@ -45,21 +48,22 @@ export class RefundService {
       throw new RefundError('Refund amount must be greater than 0');
     }
 
-    if (alreadyRefunded + refundAmount > Number(payment.amount)) {
+    const totalAmount = Number(payment.amount);
+    if (alreadyRefunded + refundAmount > totalAmount) {
       throw new RefundError(
-        `Refund amount ${refundAmount} exceeds available balance ${Number(payment.amount) - alreadyRefunded}`,
+        `Refund amount ${refundAmount} exceeds available balance ${totalAmount - alreadyRefunded}`,
       );
     }
 
     // 2. Create refund record
     const refundId = uuidv4();
-    const [refund] = await db('refunds')
+    await db('refunds')
       .insert({
         id: refundId,
         payment_id: dto.paymentId,
-        merchant_id: payment.merchant_id,
+        merchant_id: payment.merchant_id as string,
         amount: refundAmount,
-        currency: payment.currency,
+        currency: payment.currency as string,
         status: RefundStatus.PENDING,
         reason: dto.reason ?? null,
         initiated_by: dto.initiatedBy,
@@ -71,27 +75,27 @@ export class RefundService {
 
     try {
       // 3. Process refund with provider
-      const provider = this.resolveProvider(payment.provider);
+      const provider = this.resolveProvider(payment.provider as string);
       const providerRefund = await provider.createRefund({
-        providerPaymentId: payment.provider_payment_id,
+        providerPaymentId: payment.provider_payment_id as string,
         amount: refundAmount,
         reason: dto.reason,
       });
 
       // 4. Update refund record
-      const [updatedRefund] = await db('refunds')
+      const [updatedRefund] = (await db('refunds')
         .where({ id: refundId })
         .update({
           status: RefundStatus.COMPLETED,
           provider_refund_id: providerRefund.providerRefundId,
           updated_at: new Date(),
         })
-        .returning('*');
+        .returning('*')) as Record<string, unknown>[];
 
       // 5. Update payment refunded_amount & status
       const newRefundedAmount = alreadyRefunded + refundAmount;
       const newPaymentStatus =
-        newRefundedAmount >= Number(payment.amount)
+        newRefundedAmount >= totalAmount
           ? PaymentStatus.REFUNDED
           : PaymentStatus.PARTIALLY_REFUNDED;
 
@@ -106,13 +110,13 @@ export class RefundService {
         paymentId: dto.paymentId,
         type: TransactionType.REFUND,
         amount: refundAmount,
-        currency: payment.currency,
+        currency: payment.currency as string,
         status: PaymentStatus.COMPLETED,
         providerTransactionId: providerRefund.providerRefundId,
       });
 
       // 7. Fire webhook
-      await this.webhookService.dispatch(payment.merchant_id, 'refund.completed', {
+      await this.webhookService.dispatch(payment.merchant_id as string, 'refund.completed', {
         refundId,
         paymentId: dto.paymentId,
         amount: refundAmount,
@@ -120,35 +124,38 @@ export class RefundService {
 
       logPaymentEvent('refund.completed', { refundId, amount: refundAmount });
       return this.toRefund(updatedRefund);
-    } catch (err: any) {
+    } catch (err: unknown) {
       await db('refunds')
         .where({ id: refundId })
         .update({ status: RefundStatus.FAILED, updated_at: new Date() });
 
-      await this.webhookService.dispatch(payment.merchant_id, 'refund.failed', {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      await this.webhookService.dispatch(payment.merchant_id as string, 'refund.failed', {
         refundId,
         paymentId: dto.paymentId,
-        error: err.message,
+        error: errorMessage,
       });
 
-      logger.error('Refund failed', { refundId, error: err.message });
-      throw new RefundError(err.message);
+      logger.error('Refund failed', { refundId, error: errorMessage });
+      throw new RefundError(errorMessage);
     }
   }
 
   async getRefundById(id: string): Promise<Refund> {
     const db = getDb();
-    const row = await db('refunds').where({ id }).first();
-    if (!row) throw new NotFoundError('Refund', id);
+    const row = (await db('refunds').where({ id }).first()) as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new NotFoundError('Refund', id);
+    }
     return this.toRefund(row);
   }
 
   async listRefundsByPayment(paymentId: string): Promise<Refund[]> {
     const db = getDb();
-    const rows = await db('refunds')
+    const rows = (await db('refunds')
       .where({ payment_id: paymentId })
-      .orderBy('created_at', 'desc');
-    return rows.map(this.toRefund);
+      .orderBy('created_at', 'desc')) as Record<string, unknown>[];
+    return rows.map((r) => this.toRefund(r));
   }
 
   private resolveProvider(provider: string) {
@@ -159,20 +166,20 @@ export class RefundService {
     }
   }
 
-  private toRefund(row: Record<string, any>): Refund {
+  private toRefund(row: Record<string, unknown>): Refund {
     return {
-      id: row.id,
-      paymentId: row.payment_id,
-      merchantId: row.merchant_id,
+      id: row.id as string,
+      paymentId: row.payment_id as string,
+      merchantId: row.merchant_id as string,
       amount: Number(row.amount),
-      currency: row.currency,
-      status: row.status,
-      reason: row.reason,
-      providerRefundId: row.provider_refund_id,
-      initiatedBy: row.initiated_by,
-      metadata: row.metadata,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
+      currency: row.currency as string,
+      status: row.status as string,
+      reason: row.reason as string | null,
+      providerRefundId: row.provider_refund_id as string | null,
+      initiatedBy: row.initiated_by as string,
+      metadata: row.metadata as string | null,
+      createdAt: new Date(row.created_at as string | number | Date),
+      updatedAt: new Date(row.updated_at as string | number | Date),
     };
   }
 }

@@ -25,17 +25,19 @@ const db = knex({
   },
 });
 
-async function run() {
+async function run(): Promise<void> {
   const command = process.argv[2];
 
   try {
     if (command === 'rollback') {
       logger.info('Rolling back last migration batch...');
-      const [batch, migrations] = await db.migrate.rollback();
+      const result = await db.migrate.rollback() as unknown;
+      const [batch, migrations] = result as [number, string[]];
       logger.info(`Rolled back batch ${batch}`, { migrations });
     } else {
       logger.info('Running pending migrations...');
-      const [batch, migrations] = await db.migrate.latest();
+      const result = await db.migrate.latest() as unknown;
+      const [batch, migrations] = result as [number, string[]];
       if (migrations.length === 0) {
         logger.info('No pending migrations');
       } else {
@@ -50,4 +52,4 @@ async function run() {
   }
 }
 
-run();
+void run();

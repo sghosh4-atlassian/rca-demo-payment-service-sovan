@@ -21,19 +21,21 @@ async function bootstrap(): Promise<void> {
 
   // ── Graceful Shutdown ────────────────────────────────────────────────────
 
-  const shutdown = async (signal: string) => {
+  const shutdown = (signal: string): void => {
     logger.info(`Received ${signal}, shutting down gracefully...`);
 
-    server.close(async () => {
-      try {
-        await disconnectDb();
-        await disconnectRedis();
-        logger.info('Shutdown complete');
-        process.exit(0);
-      } catch (err) {
-        logger.error('Error during shutdown', { error: err });
-        process.exit(1);
-      }
+    server.close(() => {
+      void (async () => {
+        try {
+          await disconnectDb();
+          await disconnectRedis();
+          logger.info('Shutdown complete');
+          process.exit(0);
+        } catch (err) {
+          logger.error('Error during shutdown', { error: err });
+          process.exit(1);
+        }
+      })();
     });
 
     // Force-kill if graceful shutdown takes too long
@@ -43,8 +45,12 @@ async function bootstrap(): Promise<void> {
     }, 10_000);
   };
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => {
+    shutdown('SIGTERM');
+  });
+  process.on('SIGINT', () => {
+    shutdown('SIGINT');
+  });
 
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled Promise Rejection', { reason });
@@ -56,7 +62,7 @@ async function bootstrap(): Promise<void> {
   });
 }
 
-bootstrap().catch((err) => {
-  console.error('Failed to start service:', err);
+void bootstrap().catch((err: unknown) => {
+  logger.error('Failed to start service', { error: err });
   process.exit(1);
 });

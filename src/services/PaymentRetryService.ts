@@ -20,7 +20,6 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../database/connection';
-import { PaymentStatus } from '../types';
 import { ConflictError, PaymentError } from '../utils/errors';
 import logger, { logPaymentEvent } from '../utils/logger';
 
@@ -186,11 +185,11 @@ export class PaymentRetryService {
    */
   async getRetryHistory(paymentId: string): Promise<RetryAttempt[]> {
     const db = getDb();
-    const rows = await db('retry_attempts')
+    const rows = (await db('retry_attempts')
       .where({ payment_id: paymentId })
-      .orderBy('attempt_number', 'asc');
+      .orderBy('attempt_number', 'asc')) as Record<string, unknown>[];
 
-    return rows.map(this.toRetryAttempt);
+    return rows.map((r) => this.toRetryAttempt(r));
   }
 
   /**
@@ -199,14 +198,16 @@ export class PaymentRetryService {
    */
   async getCooldownRemaining(paymentId: string): Promise<number> {
     const db = getDb();
-    const lastAttempt = await db('retry_attempts')
+    const lastAttempt = (await db('retry_attempts')
       .where({ payment_id: paymentId })
       .orderBy('created_at', 'desc')
-      .first();
+      .first()) as Record<string, unknown> | undefined;
 
-    if (!lastAttempt) return 0;
+    if (!lastAttempt) {
+      return 0;
+    }
 
-    const scheduledAt = new Date(lastAttempt.scheduled_at).getTime();
+    const scheduledAt = new Date(lastAttempt.scheduled_at as string | number | Date).getTime();
     const remaining = Math.max(0, (scheduledAt - Date.now()) / 1000);
     return Math.ceil(remaining);
   }
@@ -229,21 +230,23 @@ export class PaymentRetryService {
    * Attempt 1 → 0s (immediate), 2 → 60s, 3 → 120s, 4 → 240s
    */
   private calculateDelay(attemptNumber: number): number {
-    if (attemptNumber === 1) return 0;
+    if (attemptNumber === 1) {
+      return 0;
+    }
     return this.policy.baseDelaySeconds * Math.pow(2, attemptNumber - 2);
   }
 
-  private toRetryAttempt(row: Record<string, any>): RetryAttempt {
+  private toRetryAttempt(row: Record<string, unknown>): RetryAttempt {
     return {
-      id: row.id,
-      paymentId: row.payment_id,
-      attemptNumber: row.attempt_number,
-      status: row.status,
-      failureCode: row.failure_code,
-      failureMessage: row.failure_message,
-      scheduledAt: new Date(row.scheduled_at),
-      executedAt: row.executed_at ? new Date(row.executed_at) : undefined,
-      createdAt: new Date(row.created_at),
+      id: row.id as string,
+      paymentId: row.payment_id as string,
+      attemptNumber: row.attempt_number as number,
+      status: row.status as 'pending' | 'succeeded' | 'failed',
+      failureCode: row.failure_code as string | undefined,
+      failureMessage: row.failure_message as string | undefined,
+      scheduledAt: new Date(row.scheduled_at as string | number | Date),
+      executedAt: row.executed_at ? new Date(row.executed_at as string | number | Date) : undefined,
+      createdAt: new Date(row.created_at as string | number | Date),
     };
   }
 }

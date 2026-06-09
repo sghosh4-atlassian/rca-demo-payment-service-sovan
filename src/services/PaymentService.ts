@@ -8,10 +8,8 @@ import {
   PaginatedResult,
   PaymentStatus,
   TransactionType,
-  ServiceResult,
-  PaymentWithRiskContext,
 } from '../types';
-import { NotFoundError, PaymentError, IdempotencyError, ConflictError } from '../utils/errors';
+import { NotFoundError, PaymentError, ConflictError } from '../utils/errors';
 import { StripeProvider } from '../providers/StripeProvider';
 import { PayPalProvider } from '../providers/PayPalProvider';
 import { TransactionService } from './TransactionService';
@@ -126,7 +124,7 @@ export class PaymentService {
         ? PaymentStatus.COMPLETED
         : PaymentStatus.PROCESSING;
 
-      const [updated] = await db('payments')
+      const updated = await db('payments')
         .where({ id: paymentId })
         .update({
           status,
@@ -136,6 +134,8 @@ export class PaymentService {
           updated_at: new Date(),
         })
         .returning('*');
+
+      const result = (Array.isArray(updated) ? updated[0] : updated) as Record<string, unknown>;
 
       // 6. Record ledger transaction
       await this.transactionService.createTransaction({
@@ -166,11 +166,11 @@ export class PaymentService {
       });
 
       logPaymentEvent('payment.completed', { paymentId, status, fraudScore: fraudAssessment.score });
-      return this.toPayment(updated);
+      return this.toPayment(result);
 
-    } catch (err: any) {
-      const failureCode: string = err.errorCode ?? 'UNKNOWN';
-      const failureMessage: string = err.message;
+    } catch (err: unknown) {
+      const failureCode: string = err instanceof Error && 'errorCode' in err ? (err.errorCode as string) : 'UNKNOWN';
+      const failureMessage: string = err instanceof Error ? err.message : String(err);
 
       // Mark payment as failed
       await db('payments').where({ id: paymentId }).update({
@@ -196,11 +196,12 @@ export class PaymentService {
           attemptNumber: retrySchedule.attemptNumber,
           scheduledAt: retrySchedule.scheduledAt.toISOString(),
         });
-      } catch (retryErr: any) {
+      } catch (retryErr: unknown) {
         // Non-retryable or exhausted — log and continue to failure path
+        const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
         logger.info('Payment will not be retried', {
           paymentId,
-          reason: retryErr.message,
+          reason: retryErrMsg,
         });
         // Record failure velocity for fraud scoring on future attempts
         await this.fraudRiskService.recordFailure(dto.customerId);
@@ -224,7 +225,7 @@ export class PaymentService {
     await provider.capturePayment(payment.providerPaymentId!);
 
     const db = getDb();
-    const [updated] = await db('payments')
+    const updated = await db('payments')
       .where({ id: dto.paymentId })
       .update({
         status: PaymentStatus.COMPLETED,
@@ -233,11 +234,13 @@ export class PaymentService {
       })
       .returning('*');
 
+    const result = (Array.isArray(updated) ? updated[0] : updated) as Record<string, unknown>;
+
     await this.webhookService.dispatch(payment.merchantId, 'payment.completed', {
       paymentId: dto.paymentId,
     });
 
-    return this.toPayment(updated);
+    return this.toPayment(result);
   }
 
   // ── Cancel ────────────────────────────────────────────────────────────────
@@ -255,13 +258,15 @@ export class PaymentService {
     }
 
     const db = getDb();
-    const [updated] = await db('payments')
+    const updated = await db('payments')
       .where({ id: paymentId })
       .update({ status: PaymentStatus.CANCELLED, updated_at: new Date() })
       .returning('*');
 
+    const result = (Array.isArray(updated) ? updated[0] : updated) as Record<string, unknown>;
+
     await this.webhookService.dispatch(payment.merchantId, 'payment.cancelled', { paymentId });
-    return this.toPayment(updated);
+    return this.toPayment(result);
   }
 
   // ── Read ──────────────────────────────────────────────────────────────────
@@ -269,11 +274,15 @@ export class PaymentService {
   async getPaymentById(id: string): Promise<Payment> {
     // Try cache first
     const cached = await this.cacheService.get<Payment>(`payment:${id}`);
-    if (cached) return cached;
+    if (cached) {
+      return cached;
+    }
 
     const db = getDb();
-    const row = await db('payments').where({ id }).first();
-    if (!row) throw new NotFoundError('Payment', id);
+    const row = (await db('payments').where({ id }).first()) as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new NotFoundError('Payment', id);
+    }
 
     const payment = this.toPayment(row);
     await this.cacheService.set(`payment:${id}`, payment, 300);
@@ -288,18 +297,20 @@ export class PaymentService {
 
     let query = db('payments');
 
-    if (filters.merchantId) query = query.where('merchant_id', filters.merchantId);
-    if (filters.customerId) query = query.where('customer_id', filters.customerId);
-    if (filters.orderId) query = query.where('order_id', filters.orderId);
-    if (filters.status) query = query.where('status', filters.status);
-    if (filters.method) query = query.where('method', filters.method);
-    if (filters.currency) query = query.where('currency', filters.currency);
-    if (filters.fromDate) query = query.where('created_at', '>=', filters.fromDate);
-    if (filters.toDate) query = query.where('created_at', '<=', filters.toDate);
-    if (filters.minAmount) query = query.where('amount', '>=', filters.minAmount);
-    if (filters.maxAmount) query = query.where('amount', '<=', filters.maxAmount);
+    if (filters.merchantId) {query = query.where('merchant_id', filters.merchantId);}
+    if (filters.customerId) {query = query.where('customer_id', filters.customerId);}
+    if (filters.orderId) {query = query.where('order_id', filters.orderId);}
+    if (filters.status) {query = query.where('status', filters.status);}
+    if (filters.method) {query = query.where('method', filters.method);}
+    if (filters.currency) {query = query.where('currency', filters.currency);}
+    if (filters.fromDate) {query = query.where('created_at', '>=', filters.fromDate);}
+    if (filters.toDate) {query = query.where('created_at', '<=', filters.toDate);}
+    if (filters.minAmount) {query = query.where('amount', '>=', filters.minAmount);}
+    if (filters.maxAmount) {query = query.where('amount', '<=', filters.maxAmount);}
 
-    const [{ count }] = await query.clone().count('id as count');
+    const countResult = await query.clone().count('id as count');
+    const typedCountResult = countResult[0] as Record<string, unknown>;
+    const count = typedCountResult?.count as number;
     const total = parseInt(String(count), 10);
 
     const sortBy = filters.sortBy ?? 'created_at';
@@ -307,7 +318,7 @@ export class PaymentService {
     const rows = await query.orderBy(sortBy, sortOrder).limit(limit).offset(offset);
 
     return {
-      data: rows.map(this.toPayment),
+      data: rows.map((r) => this.toPayment(r as Record<string, unknown>)),
       total,
       page,
       limit,
@@ -329,9 +340,15 @@ export class PaymentService {
 
   private async getByIdempotencyKey(key: string): Promise<Payment | null> {
     const db = getDb();
-    const ikRow = await db('idempotency_keys').where({ key }).first();
-    if (!ikRow?.payment_id) return null;
-    return this.getPaymentById(ikRow.payment_id).catch(() => null);
+    const ikRow = (await db('idempotency_keys').where({ key }).first()) as Record<string, unknown> | undefined;
+    if (!ikRow) {
+      return null;
+    }
+    const paymentId = ikRow.payment_id as string | null;
+    if (!paymentId) {
+      return null;
+    }
+    return this.getPaymentById(paymentId).catch(() => null);
   }
 
   private async storeIdempotencyResult(key: string, paymentId: string): Promise<void> {
@@ -343,28 +360,28 @@ export class PaymentService {
       .ignore();
   }
 
-  private toPayment(row: Record<string, any>): Payment {
+  private toPayment(row: Record<string, unknown>): Payment {
     return {
-      id: row.id,
-      merchantId: row.merchant_id,
-      customerId: row.customer_id,
-      orderId: row.order_id,
+      id: row.id as string,
+      merchantId: row.merchant_id as string,
+      customerId: row.customer_id as string,
+      orderId: row.order_id as string,
       amount: Number(row.amount),
-      currency: row.currency,
-      status: row.status,
-      method: row.method,
-      provider: row.provider,
-      providerPaymentId: row.provider_payment_id,
-      providerCustomerId: row.provider_customer_id,
-      description: row.description,
-      metadata: row.metadata,
-      idempotencyKey: row.idempotency_key,
-      failureCode: row.failure_code,
-      failureMessage: row.failure_message,
-      capturedAt: row.captured_at ? new Date(row.captured_at) : undefined,
+      currency: row.currency as string,
+      status: row.status as string,
+      method: row.method as string,
+      provider: row.provider as string,
+      providerPaymentId: row.provider_payment_id as string | null,
+      providerCustomerId: row.provider_customer_id as string | null,
+      description: row.description as string | null,
+      metadata: row.metadata as string | null,
+      idempotencyKey: row.idempotency_key as string,
+      failureCode: row.failure_code as string | null,
+      failureMessage: row.failure_message as string | null,
+      capturedAt: row.captured_at ? new Date(row.captured_at as string | number | Date) : undefined,
       refundedAmount: Number(row.refunded_amount),
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
+      createdAt: new Date(row.created_at as string | number | Date),
+      updatedAt: new Date(row.updated_at as string | number | Date),
     };
   }
 }

@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { AppError, isAppError } from '../utils/errors';
+import { isAppError } from '../utils/errors';
 import { ApiResponse } from '../types';
 import logger from '../utils/logger';
 

@@ -82,9 +82,12 @@ export class StripeProvider {
         fee,
         net,
       };
-    } catch (err: any) {
-      logger.error('Stripe createPayment error', { error: err.message, code: err.code });
-      throw new ProviderError('Stripe', err.message, { code: err.code, decline_code: err.decline_code });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const code = err instanceof Error && 'code' in err ? (err.code as string) : undefined;
+      const declineCode = err instanceof Error && 'decline_code' in err ? (err.decline_code as string) : undefined;
+      logger.error('Stripe createPayment error', { error: msg, code });
+      throw new ProviderError('Stripe', msg, { code, decline_code: declineCode });
     }
   }
 
@@ -93,16 +96,18 @@ export class StripeProvider {
       await this.client.paymentIntents.capture(providerPaymentId, {
         amount_to_capture: amount,
       });
-    } catch (err: any) {
-      throw new ProviderError('Stripe', `Capture failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('Stripe', `Capture failed: ${msg}`);
     }
   }
 
   async cancelPayment(providerPaymentId: string): Promise<void> {
     try {
       await this.client.paymentIntents.cancel(providerPaymentId);
-    } catch (err: any) {
-      throw new ProviderError('Stripe', `Cancel failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('Stripe', `Cancel failed: ${msg}`);
     }
   }
 
@@ -114,8 +119,9 @@ export class StripeProvider {
         reason: this.mapRefundReason(input.reason),
       });
       return { providerRefundId: refund.id };
-    } catch (err: any) {
-      throw new ProviderError('Stripe', `Refund failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('Stripe', `Refund failed: ${msg}`);
     }
   }
 
@@ -126,8 +132,9 @@ export class StripeProvider {
         signature,
         config.stripe.webhookSecret,
       );
-    } catch (err: any) {
-      throw new ProviderError('Stripe', `Invalid webhook signature: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('Stripe', `Invalid webhook signature: ${msg}`);
     }
   }
 

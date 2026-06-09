@@ -10,10 +10,12 @@ type ValidateTarget = 'body' | 'query' | 'params';
  */
 export function validate(schema: Joi.ObjectSchema, target: ValidateTarget = 'body') {
   return (req: Request, _res: Response, next: NextFunction): void => {
-    const { error, value } = schema.validate(req[target], {
+    const result = schema.validate(req[target as keyof Request], {
       abortEarly: false,
       stripUnknown: true,
     });
+    const error = result.error;
+    const value: unknown = result.value;
 
     if (error) {
       const details = error.details.map((d) => ({
@@ -23,7 +25,7 @@ export function validate(schema: Joi.ObjectSchema, target: ValidateTarget = 'bod
       return next(new ValidationError('Validation failed', details));
     }
 
-    req[target] = value;
+    (req[target as keyof Request]) = value;
     next();
   };
 }

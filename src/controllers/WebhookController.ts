@@ -1,12 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { StripeProvider } from '../providers/StripeProvider';
-import { PaymentService } from '../services/PaymentService';
 import { PaymentStatus } from '../types';
 import { getDb } from '../database/connection';
 import logger from '../utils/logger';
 
 const stripeProvider = new StripeProvider();
-const paymentService = new PaymentService();
 
 /**
  * Handles incoming Stripe webhook events.
@@ -18,28 +16,30 @@ export async function handleStripeWebhook(req: Request, res: Response, next: Nex
   let event;
   try {
     event = stripeProvider.verifyWebhookSignature(req.body as Buffer, signature);
-  } catch (err: any) {
-    logger.warn('Stripe webhook signature verification failed', { error: err.message });
-    res.status(400).json({ success: false, error: { code: 'INVALID_SIGNATURE', message: err.message } });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : 'Unknown error';
+    logger.warn('Stripe webhook signature verification failed', { error: errMsg });
+    res.status(400).json({ success: false, error: { code: 'INVALID_SIGNATURE', message: errMsg } });
     return;
   }
 
   logger.info('Stripe webhook received', { type: event.type, id: event.id });
 
   try {
+    const obj = event.data.object as Record<string, unknown>;
     switch (event.type) {
       case 'payment_intent.succeeded':
-        await handlePaymentSucceeded(event.data.object as any);
+        await handlePaymentSucceeded(obj as { id: string });
         break;
       case 'payment_intent.payment_failed':
-        await handlePaymentFailed(event.data.object as any);
+        await handlePaymentFailed(obj as { id: string; last_payment_error?: { code?: string; message?: string } });
         break;
       case 'charge.dispute.created':
-        await handleDisputeCreated(event.data.object as any);
+        await handleDisputeCreated(obj as { payment_intent: string });
         break;
       case 'charge.refunded':
         // Handled internally — log only
-        logger.info('Stripe charge.refunded event received', { chargeId: (event.data.object as any).id });
+        logger.info('Stripe charge.refunded event received', { chargeId: String(obj.id) });
         break;
       default:
         logger.debug(`Unhandled Stripe event type: ${event.type}`);

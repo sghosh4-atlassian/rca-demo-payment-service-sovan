@@ -12,7 +12,7 @@ const transactionService = new TransactionService();
 
 export async function createPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const payment = await paymentService.createPayment(req.body);
+    const payment = await paymentService.createPayment(req.body as Parameters<typeof paymentService.createPayment>[0]);
     const response: ApiResponse = { success: true, data: payment };
     res.status(201).json(response);
   } catch (err) {
@@ -34,7 +34,7 @@ export async function listPayments(req: Request, res: Response, next: NextFuncti
     const result = await paymentService.listPayments({
       ...req.query,
       merchantId: req.auth?.merchantId,
-    } as any);
+    } as Parameters<typeof paymentService.listPayments>[0]);
     res.json({ success: true, data: result.data, meta: {
       total: result.total,
       page: result.page,
@@ -53,7 +53,7 @@ export async function capturePayment(req: Request, res: Response, next: NextFunc
     const payment = await paymentService.capturePayment({
       paymentId: req.params.paymentId,
       ...req.body,
-    });
+    } as Parameters<typeof paymentService.capturePayment>[0]);
     res.json({ success: true, data: payment } as ApiResponse);
   } catch (err) {
     next(err);
@@ -76,7 +76,7 @@ export async function createRefund(req: Request, res: Response, next: NextFuncti
     const refund = await refundService.createRefund({
       ...req.body,
       initiatedBy: req.auth?.sub ?? 'system',
-    });
+    } as Parameters<typeof refundService.createRefund>[0]);
     res.status(201).json({ success: true, data: refund } as ApiResponse);
   } catch (err) {
     next(err);

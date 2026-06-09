@@ -19,21 +19,21 @@ export function getDb(): Knex {
       pool: {
         min: config.db.poolMin,
         max: config.db.poolMax,
-        afterCreate: (conn: any, done: (err: Error | null, conn: any) => void) => {
-          conn.query('SET timezone = "UTC";', (err: Error) => done(err, conn));
+        afterCreate: (conn: Record<string, unknown>, done: (err: Error | null, conn: Record<string, unknown>) => void) => {
+          (conn as Record<string, unknown> & { query: (sql: string, callback: (err: Error | null) => void) => void }).query('SET timezone = "UTC";', (err: Error | null) => done(err, conn));
         },
       },
       acquireConnectionTimeout: 10_000,
     });
 
-    db.on('query', (query) => {
+    db.on('query', (query: Record<string, unknown>) => {
       if (config.isDev) {
-        logger.debug('DB Query', { sql: query.sql, bindings: query.bindings });
+        logger.debug('DB Query', { sql: String(query.sql), bindings: query.bindings });
       }
     });
 
-    db.on('query-error', (error, query) => {
-      logger.error('DB Query Error', { error: error.message, sql: query.sql });
+    db.on('query-error', (error: Record<string, unknown>, query: Record<string, unknown>) => {
+      logger.error('DB Query Error', { error: String(error.message), sql: String(query.sql) });
     });
   }
   return db;

@@ -14,10 +14,10 @@ export async function idempotencyMiddleware(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  if (req.method !== 'POST') return next();
+  if (req.method !== 'POST') {return next();}
 
   const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
-  if (!idempotencyKey) return next();
+  if (!idempotencyKey) {return next();}
 
   const cacheKey = `idempotency:${idempotencyKey}`;
 
@@ -34,16 +34,17 @@ export async function idempotencyMiddleware(
     const originalJson = res.json.bind(res);
     res.json = (body: unknown) => {
       if (res.statusCode < 500) {
-        cache
+        void cache
           .set(cacheKey, { status: res.statusCode, body }, config.idempotency.ttlSeconds)
-          .catch((err) => logger.warn('Failed to cache idempotent response', { error: err.message }));
+          .catch((err: unknown) => logger.warn('Failed to cache idempotent response', { error: err instanceof Error ? err.message : String(err) }));
       }
       return originalJson(body);
     };
 
     next();
-  } catch (err: any) {
-    logger.warn('Idempotency middleware error', { error: err.message });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    logger.warn('Idempotency middleware error', { error: errMsg });
     next();
   }
 }
