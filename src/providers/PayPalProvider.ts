@@ -95,9 +95,10 @@ export class PayPalProvider {
       },
     );
 
-    this.accessToken = response.data.access_token;
-    this.tokenExpiry = Date.now() + response.data.expires_in * 1000 - 60_000;
-    return this.accessToken!;
+    const tokenData = response.data as { access_token: string; expires_in: number };
+    this.accessToken = tokenData.access_token;
+    this.tokenExpiry = Date.now() + tokenData.expires_in * 1000 - 60_000;
+    return this.accessToken;
   }
 
   async createPayment(input: ProviderPaymentInput): Promise<ProviderPaymentResult> {
@@ -140,23 +141,29 @@ export class PayPalProvider {
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
       );
 
-      const approvalLink = response.data.links?.find(
-        (l: { rel: string; href: string }) => l.rel === 'approve',
-      );
+      const orderData = response.data as {
+        id: string;
+        status: ProviderPaymentResult['status'];
+        links?: { rel: string; href: string }[];
+        payer?: { email_address?: string };
+      };
 
-      const payer = response.data.payer;
+      const approvalLink = orderData.links?.find((l) => l.rel === 'approve');
 
       return {
-        providerPaymentId: response.data.id,
-        providerOrderId: response.data.id,
-        captured: response.data.status === 'COMPLETED',
-        status: response.data.status,
-        payerEmail: payer?.email_address,
+        providerPaymentId: orderData.id,
+        providerOrderId: orderData.id,
+        captured: orderData.status === 'COMPLETED',
+        status: orderData.status,
+        payerEmail: orderData.payer?.email_address,
         approvalUrl: approvalLink?.href,
       };
-    } catch (err: any) {
-      logger.error('PayPal createPayment error', { error: err.message });
-      throw new ProviderError('PayPal', err.response?.data?.message ?? err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const providerMessage =
+        (err as { response?: { data?: { message?: string } } }).response?.data?.message ?? message;
+      logger.error('PayPal createPayment error', { error: message });
+      throw new ProviderError('PayPal', providerMessage);
     }
   }
 
@@ -169,21 +176,37 @@ export class PayPalProvider {
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
       );
 
-      const capture =
-        response.data.purchase_units?.[0]?.payments?.captures?.[0];
+      const captureData = response.data as {
+        id: string;
+        status: ProviderCaptureResult['status'];
+        purchase_units?: {
+          payments?: {
+            captures?: {
+              id: string;
+              status: ProviderCaptureResult['status'];
+              seller_receivable_breakdown?: {
+                paypal_fee?: { value: string };
+                net_amount?: { value: string };
+              };
+            }[];
+          };
+        }[];
+      };
 
+      const capture = captureData.purchase_units?.[0]?.payments?.captures?.[0];
       const sellerBreakdown = capture?.seller_receivable_breakdown;
       const feeValue = sellerBreakdown?.paypal_fee?.value;
       const netValue = sellerBreakdown?.net_amount?.value;
 
       return {
-        providerCaptureId: capture?.id ?? response.data.id,
-        status: capture?.status ?? response.data.status,
-        fee: feeValue != null ? Math.round(parseFloat(feeValue) * 100) : undefined,
-        net: netValue != null ? Math.round(parseFloat(netValue) * 100) : undefined,
+        providerCaptureId: capture?.id ?? captureData.id,
+        status: capture?.status ?? captureData.status,
+        fee: feeValue !== undefined ? Math.round(parseFloat(feeValue) * 100) : undefined,
+        net: netValue !== undefined ? Math.round(parseFloat(netValue) * 100) : undefined,
       };
-    } catch (err: any) {
-      throw new ProviderError('PayPal', `Capture failed: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('PayPal', `Capture failed: ${message}`);
     }
   }
 
@@ -196,8 +219,9 @@ export class PayPalProvider {
         {},
         { headers: { Authorization: `Bearer ${token}` } },
       );
-    } catch (err: any) {
-      throw new ProviderError('PayPal', `Cancel/void failed: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('PayPal', `Cancel/void failed: ${message}`);
     }
   }
 
@@ -212,8 +236,8 @@ export class PayPalProvider {
           currency_code: input.currency,
         };
       }
-      if (input.reason) body.note_to_payer = input.reason;
-      if (input.invoiceId) body.invoice_id = input.invoiceId;
+      if (input.reason) { body.note_to_payer = input.reason; }
+      if (input.invoiceId) { body.invoice_id = input.invoiceId; }
 
       const response = await this.client.post(
         `/v2/payments/captures/${input.providerPaymentId}/refund`,
@@ -221,13 +245,20 @@ export class PayPalProvider {
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
       );
 
-      return {
-        providerRefundId: response.data.id,
-        status: response.data.status,
-        createTime: response.data.create_time,
+      const refundData = response.data as {
+        id: string;
+        status: ProviderRefundResult['status'];
+        create_time: string;
       };
-    } catch (err: any) {
-      throw new ProviderError('PayPal', `Refund failed: ${err.message}`);
+
+      return {
+        providerRefundId: refundData.id,
+        status: refundData.status,
+        createTime: refundData.create_time,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ProviderError('PayPal', `Refund failed: ${message}`);
     }
   }
 }
