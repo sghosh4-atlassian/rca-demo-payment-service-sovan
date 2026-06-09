@@ -3,6 +3,15 @@ import { config } from '../config';
 import { ProviderError } from '../utils/errors';
 import logger from '../utils/logger';
 
+interface ShippingAddress {
+  line1: string;
+  line2?: string;
+  city: string;
+  state?: string;
+  postalCode: string;
+  countryCode: string; // ISO 3166-1 alpha-2
+}
+
 interface ProviderPaymentInput {
   amount: number;
   currency: string;
@@ -11,12 +20,29 @@ interface ProviderPaymentInput {
   description?: string;
   metadata?: Record<string, unknown>;
   capture?: boolean;
+  // New fields — required for redirect-based PayPal checkout flows
+  orderId?: string;
+  returnUrl: string;
+  cancelUrl: string;
+  shippingAddress?: ShippingAddress;
+  softDescriptor?: string; // appears on payer's card/bank statement
 }
 
 interface ProviderPaymentResult {
   providerPaymentId: string;
+  providerOrderId: string;       // PayPal order ID (distinct from authorization ID)
   providerCustomerId?: string;
   captured: boolean;
+  status: 'CREATED' | 'SAVED' | 'APPROVED' | 'VOIDED' | 'COMPLETED' | 'PAYER_ACTION_REQUIRED';
+  payerEmail?: string;           // populated when payer has approved the order
+  approvalUrl?: string;          // redirect URL for payer approval (PAYER_ACTION_REQUIRED flows)
+  fee?: number;
+  net?: number;
+}
+
+interface ProviderCaptureResult {
+  providerCaptureId: string;
+  status: 'COMPLETED' | 'DECLINED' | 'PARTIALLY_REFUNDED' | 'PENDING' | 'REFUNDED';
   fee?: number;
   net?: number;
 }
@@ -24,11 +50,15 @@ interface ProviderPaymentResult {
 interface ProviderRefundInput {
   providerPaymentId: string;
   amount?: number;
+  currency?: string;             // must match original payment currency
   reason?: string;
+  invoiceId?: string;            // merchant-supplied invoice reference
 }
 
 interface ProviderRefundResult {
   providerRefundId: string;
+  status: 'CANCELLED' | 'PENDING' | 'COMPLETED';
+  createTime: string;            // ISO 8601 timestamp from PayPal
 }
 
 export class PayPalProvider {
@@ -75,23 +105,54 @@ export class PayPalProvider {
       const token = await this.getAccessToken();
       const amountValue = (input.amount / 100).toFixed(2);
 
+      const purchaseUnit: Record<string, unknown> = {
+        amount: { currency_code: input.currency, value: amountValue },
+        description: input.description,
+        soft_descriptor: input.softDescriptor,
+        custom_id: input.orderId,
+      };
+
+      if (input.shippingAddress) {
+        purchaseUnit.shipping = {
+          address: {
+            address_line_1: input.shippingAddress.line1,
+            address_line_2: input.shippingAddress.line2,
+            admin_area_2: input.shippingAddress.city,
+            admin_area_1: input.shippingAddress.state,
+            postal_code: input.shippingAddress.postalCode,
+            country_code: input.shippingAddress.countryCode,
+          },
+        };
+      }
+
       const response = await this.client.post(
         '/v2/checkout/orders',
         {
           intent: input.capture ? 'CAPTURE' : 'AUTHORIZE',
-          purchase_units: [
-            {
-              amount: { currency_code: input.currency, value: amountValue },
-              description: input.description,
-            },
-          ],
+          purchase_units: [purchaseUnit],
+          application_context: {
+            return_url: input.returnUrl,
+            cancel_url: input.cancelUrl,
+            shipping_preference: input.shippingAddress ? 'SET_PROVIDED_ADDRESS' : 'GET_FROM_FILE',
+            user_action: 'PAY_NOW',
+          },
         },
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
       );
 
+      const approvalLink = response.data.links?.find(
+        (l: { rel: string; href: string }) => l.rel === 'approve',
+      );
+
+      const payer = response.data.payer;
+
       return {
         providerPaymentId: response.data.id,
+        providerOrderId: response.data.id,
         captured: response.data.status === 'COMPLETED',
+        status: response.data.status,
+        payerEmail: payer?.email_address,
+        approvalUrl: approvalLink?.href,
       };
     } catch (err: any) {
       logger.error('PayPal createPayment error', { error: err.message });
@@ -99,14 +160,28 @@ export class PayPalProvider {
     }
   }
 
-  async capturePayment(providerPaymentId: string): Promise<void> {
+  async capturePayment(providerPaymentId: string): Promise<ProviderCaptureResult> {
     try {
       const token = await this.getAccessToken();
-      await this.client.post(
+      const response = await this.client.post(
         `/v2/checkout/orders/${providerPaymentId}/capture`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
       );
+
+      const capture =
+        response.data.purchase_units?.[0]?.payments?.captures?.[0];
+
+      const sellerBreakdown = capture?.seller_receivable_breakdown;
+      const feeValue = sellerBreakdown?.paypal_fee?.value;
+      const netValue = sellerBreakdown?.net_amount?.value;
+
+      return {
+        providerCaptureId: capture?.id ?? response.data.id,
+        status: capture?.status ?? response.data.status,
+        fee: feeValue != null ? Math.round(parseFloat(feeValue) * 100) : undefined,
+        net: netValue != null ? Math.round(parseFloat(netValue) * 100) : undefined,
+      };
     } catch (err: any) {
       throw new ProviderError('PayPal', `Capture failed: ${err.message}`);
     }
@@ -130,10 +205,15 @@ export class PayPalProvider {
     try {
       const token = await this.getAccessToken();
       const body: Record<string, unknown> = {};
+
       if (input.amount) {
-        body.amount = { value: (input.amount / 100).toFixed(2) };
+        body.amount = {
+          value: (input.amount / 100).toFixed(2),
+          currency_code: input.currency,
+        };
       }
       if (input.reason) body.note_to_payer = input.reason;
+      if (input.invoiceId) body.invoice_id = input.invoiceId;
 
       const response = await this.client.post(
         `/v2/payments/captures/${input.providerPaymentId}/refund`,
@@ -141,7 +221,11 @@ export class PayPalProvider {
         { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } },
       );
 
-      return { providerRefundId: response.data.id };
+      return {
+        providerRefundId: response.data.id,
+        status: response.data.status,
+        createTime: response.data.create_time,
+      };
     } catch (err: any) {
       throw new ProviderError('PayPal', `Refund failed: ${err.message}`);
     }
