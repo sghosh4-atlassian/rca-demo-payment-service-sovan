@@ -15,7 +15,7 @@ jest.mock('../../services/CacheService', () => ({
   })),
 }));
 
-function makeToken(role: 'admin' | 'merchant' | 'readonly' = 'merchant', merchantId = 'merch_1') {
+function makeToken(role: 'admin' | 'merchant' | 'readonly' = 'merchant', merchantId = '11111111-1111-1111-1111-111111111111') {
   return jwt.sign({ sub: 'user_1', merchantId, role }, config.jwt.secret, { expiresIn: '1h' });
 }
 
@@ -39,19 +39,24 @@ describe('Payments API', () => {
   let app: ReturnType<typeof createApp>;
   let mockPaymentService: jest.Mocked<PaymentService>;
 
-  beforeEach(() => {
-    jest.clearAllMocks();
+  beforeAll(() => {
+    // createApp() triggers PaymentController module load which instantiates PaymentService.
+    // Capture the mock instance once after the first instantiation.
     app = createApp();
     mockPaymentService = (PaymentService as jest.MockedClass<typeof PaymentService>)
       .mock.instances[0] as jest.Mocked<PaymentService>;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
   // ── POST /api/v1/payments ─────────────────────────────────────────────────
 
   describe('POST /api/v1/payments', () => {
     const validBody = {
-      merchantId: 'merch_1',
-      customerId: 'cust_1',
+      merchantId: '11111111-1111-1111-1111-111111111111',
+      customerId: '22222222-2222-2222-2222-222222222222',
       orderId: 'order_1',
       amount: 1000,
       currency: 'USD',

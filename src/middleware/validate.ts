@@ -25,7 +25,7 @@ export function validate(schema: Joi.ObjectSchema, target: ValidateTarget = 'bod
       return next(new ValidationError('Validation failed', details));
     }
 
-    (req[target as keyof Request]) = value;
+    (req as unknown as Record<string, unknown>)[target] = value;
     next();
   };
 }
