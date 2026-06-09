@@ -110,7 +110,7 @@ export class TransactionService {
       paymentId: row.payment_id as string,
       type: row.type as TransactionType,
       amount: Number(row.amount),
-      currency: row.currency as string,
+      currency: row.currency as Currency,
       status: row.status as PaymentStatus,
       providerTransactionId: row.provider_transaction_id as string | undefined,
       fee: row.fee ? Number(row.fee) : undefined,

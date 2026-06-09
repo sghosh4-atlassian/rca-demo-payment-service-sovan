@@ -25,6 +25,8 @@ const baseDTO = {
   provider: PaymentProvider.STRIPE,
   idempotencyKey: 'key_1',
   capture: true,
+  returnUrl: 'https://example.com/payment/return',
+  cancelUrl: 'https://example.com/payment/cancel',
 };
 
 describe('FraudRiskService', () => {
