@@ -3,12 +3,6 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const required = (key: string): string => {
-  const val = process.env[key];
-  if (!val) throw new Error(`Missing required environment variable: ${key}`);
-  return val;
-};
-
 const optional = (key: string, fallback: string): string =>
   process.env[key] ?? fallback;
 

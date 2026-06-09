@@ -6,7 +6,10 @@ const { combine, timestamp, errors, json, colorize, printf } = winston.format;
 
 const devFormat = printf(({ level, message, timestamp, stack, ...meta }) => {
   const metaStr = Object.keys(meta).length ? `\n${JSON.stringify(meta, null, 2)}` : '';
-  return `${timestamp} [${level}]: ${stack || message}${metaStr}`;
+  const timestampStr = String(timestamp);
+  const levelStr = String(level);
+  const stackOrMsg = String(stack || message);
+  return `${timestampStr} [${levelStr}]: ${stackOrMsg}${metaStr}`;
 });
 
 const logger = winston.createLogger({

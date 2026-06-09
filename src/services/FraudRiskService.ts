@@ -175,8 +175,9 @@ export class FraudRiskService {
         .count('id as count')
         .first();
 
-      const count = Number(result?.count ?? 0);
-      const avg = Number(result?.avg_amount ?? 0);
+      const typedResult = result as Record<string, unknown>;
+      const count = Number(typedResult?.count ?? 0);
+      const avg = Number(typedResult?.avg_amount ?? 0);
 
       // Only flag if customer has payment history (avoid false positives on first payment)
       if (count >= 3 && avg > 0 && amount > avg * 3) {
@@ -186,8 +187,9 @@ export class FraudRiskService {
           weight: 20,
         });
       }
-    } catch (err: any) {
-      logger.warn('FraudRiskService: amount anomaly check failed', { error: err.message });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn('FraudRiskService: amount anomaly check failed', { error: errMsg });
     }
   }
 
@@ -202,7 +204,9 @@ export class FraudRiskService {
       const cacheKey = `fraud:firsttime:${customerId}`;
       const cached = await this.cache.get<boolean>(cacheKey);
 
-      if (cached === false) return; // already a known customer
+      if (cached === false) {
+        return;
+      } // already a known customer
 
       const db = getDb();
       const row = await db('payments')
@@ -210,7 +214,8 @@ export class FraudRiskService {
         .count('id as count')
         .first();
 
-      const isFirstTime = Number(row?.count ?? 0) === 0;
+      const typedRow = row as Record<string, unknown>;
+      const isFirstTime = Number(typedRow?.count ?? 0) === 0;
 
       // Cache the "known customer" flag for 24 hours
       await this.cache.set(cacheKey, !isFirstTime, 86400);
@@ -222,8 +227,9 @@ export class FraudRiskService {
           weight: 10,
         });
       }
-    } catch (err: any) {
-      logger.warn('FraudRiskService: first-time check failed', { error: err.message });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn('FraudRiskService: first-time check failed', { error: errMsg });
     }
   }
 
@@ -253,9 +259,10 @@ export class FraudRiskService {
         requires_review: assessment.requiresReview,
         assessed_at: assessment.assessedAt,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Non-blocking — log and continue
-      logger.warn('FraudRiskService: failed to persist assessment', { error: err.message });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.warn('FraudRiskService: failed to persist assessment', { error: errMsg });
     }
   }
 
@@ -263,19 +270,21 @@ export class FraudRiskService {
 
   async getAssessmentByPaymentId(paymentId: string): Promise<FraudAssessment | null> {
     const db = getDb();
-    const row = await db('fraud_assessments').where({ payment_id: paymentId }).first();
-    if (!row) return null;
+    const row = (await db('fraud_assessments').where({ payment_id: paymentId }).first()) as Record<string, unknown> | undefined;
+    if (!row) {
+      return null;
+    }
 
     return {
-      paymentId: row.payment_id,
-      customerId: row.customer_id,
-      merchantId: row.merchant_id,
-      score: row.score,
-      riskLevel: row.risk_level,
-      signals: JSON.parse(row.signals),
-      blocked: row.blocked,
-      requiresReview: row.requires_review,
-      assessedAt: new Date(row.assessed_at),
+      paymentId: row.payment_id as string,
+      customerId: row.customer_id as string,
+      merchantId: row.merchant_id as string,
+      score: row.score as number,
+      riskLevel: row.risk_level as FraudRiskLevel,
+      signals: JSON.parse(row.signals as string) as FraudSignal[],
+      blocked: row.blocked as boolean,
+      requiresReview: row.requires_review as boolean,
+      assessedAt: new Date(row.assessed_at as string | number | Date),
     };
   }
 }

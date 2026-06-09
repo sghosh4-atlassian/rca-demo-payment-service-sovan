@@ -10,10 +10,12 @@ type ValidateTarget = 'body' | 'query' | 'params';
  */
 export function validate(schema: Joi.ObjectSchema, target: ValidateTarget = 'body') {
   return (req: Request, _res: Response, next: NextFunction): void => {
-    const { error, value } = schema.validate(req[target], {
+    const result = schema.validate(req[target as keyof Request], {
       abortEarly: false,
       stripUnknown: true,
     });
+    const error = result.error;
+    const value: unknown = result.value;
 
     if (error) {
       const details = error.details.map((d) => ({
@@ -23,7 +25,7 @@ export function validate(schema: Joi.ObjectSchema, target: ValidateTarget = 'bod
       return next(new ValidationError('Validation failed', details));
     }
 
-    req[target] = value;
+    (req as unknown as Record<string, unknown>)[target] = value;
     next();
   };
 }
@@ -46,6 +48,10 @@ export const createPaymentSchema = Joi.object({
   metadata: Joi.object().optional(),
   idempotencyKey: Joi.string().min(8).max(255).required(),
   capture: Joi.boolean().default(true),
+  returnUrl: Joi.string().uri().required()
+    .description('URL to redirect payer to after approval (PayPal checkout flows)'),
+  cancelUrl: Joi.string().uri().required()
+    .description('URL to redirect payer to if they cancel (PayPal checkout flows)'),
 });
 
 export const capturePaymentSchema = Joi.object({

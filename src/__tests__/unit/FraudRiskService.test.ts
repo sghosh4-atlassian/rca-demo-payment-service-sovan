@@ -25,6 +25,8 @@ const baseDTO = {
   provider: PaymentProvider.STRIPE,
   idempotencyKey: 'key_1',
   capture: true,
+  returnUrl: 'https://example.com/payment/return',
+  cancelUrl: 'https://example.com/payment/cancel',
 };
 
 describe('FraudRiskService', () => {
@@ -77,12 +79,14 @@ describe('FraudRiskService', () => {
     it('returns HIGH risk and blocks when velocity exceeds threshold', async () => {
       // Payment velocity = 8 (exceeds threshold of 5 → +30)
       // Failure velocity = 5 (exceeds threshold of 3 → +25)
-      // First time customer (+10)
+      // Amount anomaly: avg=200, payment=1000 → 5× average, count=5 → +20
+      // Total: 30 + 25 + 20 = 75 → blocked
       mockCache.increment.mockResolvedValue(8);
       mockCache.get.mockResolvedValue(5);   // failure count
       mockCache.set.mockResolvedValue(undefined);
 
-      mockDb.first.mockResolvedValue({ avg_amount: 0, count: 0 });
+      // avg_amount=200, count=5 → payment of 1000 is 5× average → AMOUNT_ANOMALY (+20)
+      mockDb.first.mockResolvedValue({ avg_amount: '200', count: '5' });
 
       const assessment = await service.assess(baseDTO, 'pay_test_3');
 

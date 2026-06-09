@@ -34,9 +34,9 @@ router.use(authenticate);
  */
 router.post(
   '/',
-  idempotencyMiddleware,
+  (req, res, next) => { void idempotencyMiddleware(req, res, next); },
   validate(createPaymentSchema),
-  createPayment,
+  (req, res, next) => { void createPayment(req, res, next); },
 );
 
 /**
@@ -46,14 +46,14 @@ router.post(
 router.get(
   '/',
   validate(paymentFiltersSchema, 'query'),
-  listPayments,
+  (req, res, next) => { void listPayments(req, res, next); },
 );
 
 /**
  * GET /payments/:paymentId
  * Retrieve a single payment by ID.
  */
-router.get('/:paymentId', getPayment);
+router.get('/:paymentId', (req, res, next) => { void getPayment(req, res, next); });
 
 /**
  * POST /payments/:paymentId/capture
@@ -63,7 +63,7 @@ router.post(
   '/:paymentId/capture',
   authorize('admin', 'merchant'),
   validate(capturePaymentSchema),
-  capturePayment,
+  (req, res, next) => { void capturePayment(req, res, next); },
 );
 
 /**
@@ -73,7 +73,7 @@ router.post(
 router.post(
   '/:paymentId/cancel',
   authorize('admin', 'merchant'),
-  cancelPayment,
+  (req, res, next) => { void cancelPayment(req, res, next); },
 );
 
 // ── Refunds ───────────────────────────────────────────────────────────────────
@@ -85,22 +85,22 @@ router.post(
 router.post(
   '/:paymentId/refunds',
   authorize('admin', 'merchant'),
-  idempotencyMiddleware,
+  (req, res, next) => { void idempotencyMiddleware(req, res, next); },
   validate(createRefundSchema),
-  createRefund,
+  (req, res, next) => { void createRefund(req, res, next); },
 );
 
 /**
  * GET /payments/:paymentId/refunds
  * List all refunds for a payment.
  */
-router.get('/:paymentId/refunds', listRefunds);
+router.get('/:paymentId/refunds', (req, res, next) => { void listRefunds(req, res, next); });
 
 /**
  * GET /payments/:paymentId/refunds/:refundId
  * Get a specific refund.
  */
-router.get('/:paymentId/refunds/:refundId', getRefund);
+router.get('/:paymentId/refunds/:refundId', (req, res, next) => { void getRefund(req, res, next); });
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
@@ -108,7 +108,7 @@ router.get('/:paymentId/refunds/:refundId', getRefund);
  * GET /payments/:paymentId/transactions
  * List all ledger transactions for a payment.
  */
-router.get('/:paymentId/transactions', listTransactions);
+router.get('/:paymentId/transactions', (req, res, next) => { void listTransactions(req, res, next); });
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ router.get('/:paymentId/transactions', listTransactions);
 router.get(
   '/summary/:merchantId',
   authorize('admin', 'merchant'),
-  getPaymentSummary,
+  (req, res, next) => { void getPaymentSummary(req, res, next); },
 );
 
 export default router;

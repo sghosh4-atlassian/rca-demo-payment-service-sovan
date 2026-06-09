@@ -26,6 +26,9 @@ const mockDb = {
   where: jest.fn().mockReturnThis(),
   first: jest.fn(),
   insert: jest.fn().mockReturnThis(),
+  onConflict: jest.fn().mockReturnThis(),
+  ignore: jest.fn().mockReturnThis(),
+  merge: jest.fn().mockReturnThis(),
   update: jest.fn().mockReturnThis(),
   returning: jest.fn(),
   count: jest.fn(),
@@ -68,6 +71,8 @@ const baseDTO = {
   provider: PaymentProvider.STRIPE,
   idempotencyKey: 'unique-idem-key-abc123',
   capture: true,
+  returnUrl: 'https://example.com/payment/return',
+  cancelUrl: 'https://example.com/payment/cancel',
 };
 
 describe('PaymentService', () => {
@@ -163,7 +168,7 @@ describe('PaymentService', () => {
       const payment = await service.capturePayment({ paymentId: 'pay_123' });
 
       expect(payment.status).toBe(PaymentStatus.COMPLETED);
-      expect(mockStripe.capturePayment).toHaveBeenCalledWith('pi_stripe_123', undefined);
+      expect(mockStripe.capturePayment).toHaveBeenCalledWith('pi_stripe_123');
     });
 
     it('throws ConflictError when payment is not in PROCESSING state', async () => {

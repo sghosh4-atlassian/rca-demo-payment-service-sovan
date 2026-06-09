@@ -50,7 +50,7 @@ export function createWebhookSignature(payload: string, secret: string): string 
  * Constant-time string comparison to prevent timing attacks.
  */
 export function safeCompare(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
+  if (a.length !== b.length) {return false;}
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 

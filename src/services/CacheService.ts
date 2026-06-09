@@ -32,8 +32,9 @@ export class CacheService {
     try {
       const value = await this.redis.get(key);
       return value ? (JSON.parse(value) as T) : null;
-    } catch (err: any) {
-      logger.warn('Cache GET failed', { key, error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('Cache GET failed', { key, error: msg });
       return null;
     }
   }
@@ -46,16 +47,18 @@ export class CacheService {
       } else {
         await this.redis.set(key, serialized);
       }
-    } catch (err: any) {
-      logger.warn('Cache SET failed', { key, error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('Cache SET failed', { key, error: msg });
     }
   }
 
   async del(key: string): Promise<void> {
     try {
       await this.redis.del(key);
-    } catch (err: any) {
-      logger.warn('Cache DEL failed', { key, error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('Cache DEL failed', { key, error: msg });
     }
   }
 
@@ -65,8 +68,9 @@ export class CacheService {
       if (keys.length > 0) {
         await this.redis.del(...keys);
       }
-    } catch (err: any) {
-      logger.warn('Cache pattern invalidation failed', { pattern, error: err.message });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn('Cache pattern invalidation failed', { pattern, error: msg });
     }
   }
 

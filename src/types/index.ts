@@ -172,6 +172,8 @@ export interface CreatePaymentDTO {
   metadata?: Record<string, unknown>;
   idempotencyKey: string;
   capture?: boolean;  // default: true
+  returnUrl: string;
+  cancelUrl: string;
 }
 
 export interface CapturePaymentDTO {

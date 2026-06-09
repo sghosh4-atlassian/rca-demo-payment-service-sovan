@@ -18,7 +18,7 @@ interface CreateTransactionInput {
 export class TransactionService {
   async createTransaction(input: CreateTransactionInput): Promise<Transaction> {
     const db = getDb();
-    const [row] = await db('transactions')
+    const rows = (await db('transactions')
       .insert({
         id: uuidv4(),
         payment_id: input.paymentId,
@@ -31,15 +31,17 @@ export class TransactionService {
         net: input.net ?? null,
         metadata: input.metadata ? JSON.stringify(input.metadata) : null,
       })
-      .returning('*');
+      .returning('*')) as Record<string, unknown>[];
 
-    return this.toTransaction(row);
+    return this.toTransaction(rows[0]);
   }
 
   async getTransactionById(id: string): Promise<Transaction> {
     const db = getDb();
-    const row = await db('transactions').where({ id }).first();
-    if (!row) throw new NotFoundError('Transaction', id);
+    const row = (await db('transactions').where({ id }).first()) as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new NotFoundError('Transaction', id);
+    }
     return this.toTransaction(row);
   }
 
@@ -48,7 +50,7 @@ export class TransactionService {
     const rows = await db('transactions')
       .where({ payment_id: paymentId })
       .orderBy('created_at', 'asc');
-    return rows.map(this.toTransaction);
+    return rows.map((r) => this.toTransaction(r as Record<string, unknown>));
   }
 
   async getPaymentSummary(
@@ -85,30 +87,36 @@ export class TransactionService {
     let netRevenue = 0;
     let count = 0;
 
-    for (const row of rows) {
-      byCurrency[row.currency] = Number(row.total_volume);
-      totalVolume += Number(row.total_volume);
-      totalFees += Number(row.total_fees);
-      netRevenue += Number(row.net_revenue);
-      count += Number(row.count);
+    for (const row of rows as Record<string, unknown>[]) {
+      const currency = row.currency as string;
+      const totalVolumeVal = Number(row.total_volume);
+      const totalFeesVal = Number(row.total_fees);
+      const netRevenueVal = Number(row.net_revenue);
+      const countVal = Number(row.count);
+      
+      byCurrency[currency] = totalVolumeVal;
+      totalVolume += totalVolumeVal;
+      totalFees += totalFeesVal;
+      netRevenue += netRevenueVal;
+      count += countVal;
     }
 
     return { totalVolume, totalFees, netRevenue, count, byCurrency };
   }
 
-  private toTransaction(row: Record<string, any>): Transaction {
+  private toTransaction(row: Record<string, unknown>): Transaction {
     return {
-      id: row.id,
-      paymentId: row.payment_id,
-      type: row.type,
+      id: row.id as string,
+      paymentId: row.payment_id as string,
+      type: row.type as TransactionType,
       amount: Number(row.amount),
-      currency: row.currency,
-      status: row.status,
-      providerTransactionId: row.provider_transaction_id,
+      currency: row.currency as Currency,
+      status: row.status as PaymentStatus,
+      providerTransactionId: row.provider_transaction_id as string | undefined,
       fee: row.fee ? Number(row.fee) : undefined,
       net: row.net ? Number(row.net) : undefined,
-      metadata: row.metadata,
-      createdAt: new Date(row.created_at),
+      metadata: row.metadata as Record<string, unknown> | undefined,
+      createdAt: new Date(row.created_at as string | number),
     };
   }
 }

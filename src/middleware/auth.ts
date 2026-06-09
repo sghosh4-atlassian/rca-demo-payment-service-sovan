@@ -11,11 +11,9 @@ export interface AuthPayload {
   exp: number;
 }
 
-declare global {
-  namespace Express {
-    interface Request {
-      auth?: AuthPayload;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    auth?: AuthPayload;
   }
 }
 
@@ -33,8 +31,8 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
     const payload = jwt.verify(token, config.jwt.secret) as AuthPayload;
     req.auth = payload;
     next();
-  } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
+  } catch (err: unknown) {
+    if (err instanceof jwt.JsonWebTokenError && err.name === 'TokenExpiredError') {
       next(new UnauthorizedError('Token has expired'));
     } else {
       next(new UnauthorizedError('Invalid token'));
@@ -47,7 +45,7 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
  */
 export function authorize(...roles: AuthPayload['role'][]) {
   return (req: Request, _res: Response, next: NextFunction): void => {
-    if (!req.auth) return next(new UnauthorizedError());
+    if (!req.auth) {return next(new UnauthorizedError());}
     if (!roles.includes(req.auth.role)) {
       return next(new ForbiddenError(`Role '${req.auth.role}' is not permitted`));
     }
@@ -60,7 +58,7 @@ export function authorize(...roles: AuthPayload['role'][]) {
  */
 export function requireMerchantOwnership(req: Request, _res: Response, next: NextFunction): void {
   const { merchantId } = req.params;
-  if (!req.auth) return next(new UnauthorizedError());
+  if (!req.auth) {return next(new UnauthorizedError());}
   if (req.auth.role !== 'admin' && req.auth.merchantId !== merchantId) {
     return next(new ForbiddenError('Access denied to this merchant resource'));
   }

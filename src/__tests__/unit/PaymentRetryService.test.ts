@@ -5,6 +5,9 @@ import { ConflictError, PaymentError } from '../../utils/errors';
 jest.mock('../../database/connection');
 jest.mock('uuid', () => ({ v4: () => 'test-uuid' }));
 
+// Backing store for the count value returned when the chain is awaited directly
+let mockCountValue = '0';
+
 const mockDb = {
   where: jest.fn().mockReturnThis(),
   count: jest.fn().mockReturnThis(),
@@ -12,6 +15,9 @@ const mockDb = {
   first: jest.fn(),
   insert: jest.fn().mockResolvedValue(undefined),
   update: jest.fn().mockResolvedValue(undefined),
+  // Makes `await db('table').where(...).count(...)` resolve to [{ count }]
+  then: (resolve: (v: any) => any, reject?: (e: any) => any) =>
+    Promise.resolve([{ count: mockCountValue }]).then(resolve, reject),
 };
 
 describe('PaymentRetryService', () => {
@@ -19,6 +25,7 @@ describe('PaymentRetryService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCountValue = '0'; // reset count before each test
     (getDb as jest.Mock).mockReturnValue(
       Object.assign(jest.fn().mockReturnValue(mockDb), mockDb),
     );
@@ -27,7 +34,7 @@ describe('PaymentRetryService', () => {
 
   describe('scheduleRetry()', () => {
     it('schedules first retry with no delay for a retryable failure code', async () => {
-      mockDb.first.mockResolvedValue({ count: '0' });
+      mockCountValue = '0';
 
       const result = await service.scheduleRetry('pay_1', 'card_declined', 'Card was declined');
 
@@ -45,7 +52,7 @@ describe('PaymentRetryService', () => {
     });
 
     it('schedules second retry with 60s delay (exponential backoff)', async () => {
-      mockDb.first.mockResolvedValue({ count: '1' });
+      mockCountValue = '1';
 
       const before = Date.now();
       const result = await service.scheduleRetry('pay_1', 'processing_error', 'Timeout');
@@ -75,7 +82,7 @@ describe('PaymentRetryService', () => {
     });
 
     it('throws ConflictError when max retry attempts reached', async () => {
-      mockDb.first.mockResolvedValue({ count: '3' }); // already at max (3)
+      mockCountValue = '3'; // already at max (3)
 
       await expect(
         service.scheduleRetry('pay_1', 'card_declined', 'Declined'),
@@ -108,12 +115,12 @@ describe('PaymentRetryService', () => {
 
   describe('isExhausted()', () => {
     it('returns false when attempts < maxAttempts', async () => {
-      mockDb.first.mockResolvedValue({ count: '2' });
+      mockCountValue = '2';
       expect(await service.isExhausted('pay_1')).toBe(false);
     });
 
     it('returns true when attempts === maxAttempts', async () => {
-      mockDb.first.mockResolvedValue({ count: '3' });
+      mockCountValue = '3';
       expect(await service.isExhausted('pay_1')).toBe(true);
     });
   });

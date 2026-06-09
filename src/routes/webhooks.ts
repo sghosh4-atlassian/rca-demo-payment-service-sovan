@@ -8,6 +8,6 @@ const router = Router();
  * Stripe sends signed events here.
  * Raw body parsing is applied at the app level for this route only.
  */
-router.post('/stripe', handleStripeWebhook);
+router.post('/stripe', (req, res, next) => { void handleStripeWebhook(req, res, next); });
 
 export default router;
