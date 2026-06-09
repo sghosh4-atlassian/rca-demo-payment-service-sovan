@@ -58,6 +58,8 @@ describe('Payments API', () => {
       method: 'card',
       provider: 'stripe',
       idempotencyKey: 'unique-key-xyz-123',
+      returnUrl: 'https://example.com/payment/return',
+      cancelUrl: 'https://example.com/payment/cancel',
     };
 
     it('creates a payment and returns 201', async () => {

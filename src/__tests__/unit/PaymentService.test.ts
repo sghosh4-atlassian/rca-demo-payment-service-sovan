@@ -68,6 +68,8 @@ const baseDTO = {
   provider: PaymentProvider.STRIPE,
   idempotencyKey: 'unique-idem-key-abc123',
   capture: true,
+  returnUrl: 'https://example.com/payment/return',
+  cancelUrl: 'https://example.com/payment/cancel',
 };
 
 describe('PaymentService', () => {

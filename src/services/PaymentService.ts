@@ -117,6 +117,8 @@ export class PaymentService {
         description: dto.description,
         metadata: { paymentId, orderId: dto.orderId, merchantId: dto.merchantId },
         capture: dto.capture ?? true,
+        returnUrl: dto.returnUrl,
+        cancelUrl: dto.cancelUrl,
       });
 
       // 5. Update with provider result
@@ -219,7 +221,7 @@ export class PaymentService {
     }
 
     const provider = this.resolveProvider(payment.provider);
-    await provider.capturePayment(payment.providerPaymentId!, dto.amount);
+    await provider.capturePayment(payment.providerPaymentId!);
 
     const db = getDb();
     const [updated] = await db('payments')

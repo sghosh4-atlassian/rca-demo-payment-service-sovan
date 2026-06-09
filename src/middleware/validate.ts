@@ -46,6 +46,10 @@ export const createPaymentSchema = Joi.object({
   metadata: Joi.object().optional(),
   idempotencyKey: Joi.string().min(8).max(255).required(),
   capture: Joi.boolean().default(true),
+  returnUrl: Joi.string().uri().required()
+    .description('URL to redirect payer to after approval (PayPal checkout flows)'),
+  cancelUrl: Joi.string().uri().required()
+    .description('URL to redirect payer to if they cancel (PayPal checkout flows)'),
 });
 
 export const capturePaymentSchema = Joi.object({
