@@ -113,4 +113,11 @@ jobs:
 
       - name: Run integration tests
         run: npm run test:integration
+        
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production  # ← THIS is critical
+    steps:
+      - run: echo "Deploying..."
+
 
