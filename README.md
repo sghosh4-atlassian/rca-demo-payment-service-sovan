@@ -350,7 +350,7 @@ See [`.env.example`](.env.example) for the full list of environment variables.
 
 ## 🤝 Contributing
 
-1. Branch from `develop`: `git checkout -b feat/your-feature`
+1. Branch from `main`: `git checkout -b feat/your-feature`
 2. Write tests for your changes
 3. Ensure `npm test` and `npm run lint` pass
 4. Open a pull request targeting `develop`
