@@ -354,6 +354,7 @@ See [`.env.example`](.env.example) for the full list of environment variables.
 2. Write tests for your changes
 3. Ensure `npm test` and `npm run lint` pass
 4. Open a pull request targeting `develop`
+5. Add a PR description
 
 ---
 
